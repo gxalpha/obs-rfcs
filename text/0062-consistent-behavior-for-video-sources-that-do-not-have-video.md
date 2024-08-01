@@ -3,7 +3,7 @@
 ## Summary / Abstract
 To fix the problem of what to do when a video source has no video, we create a system for the user to indicate what they want the source to do.
 Presented to the user as a separate setting, the user can choose between invisible, the last frame, or a black image the size of the last frame.
-The source queries OBS once it no longer has video to find the status of that setting and act accordingly.
+OBS handles when a source indicates that it no longer has video.
 
 
 ## Motivation
@@ -16,12 +16,12 @@ Part of this are privacy concerns on what is shown, however this goes both ways:
 Giving control over this to the user should address those conerns.
 
 ## Details
-### New APIs / Internals
+### New APIs
 The problem with the current situation is that every source needs to implement its own property to show basically the same thing.
 To simplify this, the idea is to not use the source properties/settings API.
-We create a setting that's not stored as part of the usual source settings and can be queried by the source.
+We create a setting that's not stored as part of the usual source settings.
 
-A video source that at some point might not have video it should indicate so via a new capability flag (The exact value of this might change if (1 << 17) is taken by the time of implementation) in its `obs_source_info`:
+A video source that at some point might not have video it should indicate so via a new capability flag (The exact value of this might change if `(1 << 17)` is taken by the time of implementation) in its `obs_source_info`:
 ```c
 #define OBS_SOURCE_CAP_MIGHT_NOT_HAVE_VIDEO (1 << 17)
 ```
@@ -40,28 +40,47 @@ enum obs_source_no_video_behavior {
 enum obs_source_no_video_behavior obs_source_get_no_video_behavior(obs_source_t *source);
 void obs_source_set_no_video_behavior(obs_source_t *source, enum obs_source_no_video_behavior behavior);
 ```
-If a source at some point has no video, it should query what state is set via
-`obs_source_get_no_video_behavior`
-According to what is set, it is then the source's responsibility to output what is asked of it.
-For this, sources should remember the last frame and its dimensions.
-The value of this can change at any time (for the avoidance of doubt, this includes when there currently is no video), and should always be respected.
-If a source is supposed to show the last frame but never had one, it should show a black frame instead.
-The same applies if it receives an unknown value (e.g., when a future version of OBS adds new values but the source was not yet updated).
+
+`obs_source_info` gets extended with a `has_video` callback (see "Synchronous sources" for context):
+```c
+struct obs_source_info {
+/* ... */
+    bool (*has_video)(void *data);
+};
+```
+
+### Source Behavior
+#### Async sources
+If an async source at some point no longer has new video to output (e.g., because a Video Capture Device gets disconnected), it should call `obs_source_output_video(source, NULL)`.
+Note that passing `NULL` as the parameter no longer means that no video will be shown - libobs will handle the actual video output.
+
+Asynchronous sources should not call `obs_source_output_video(source, NULL)` if they do not set the `OBS_SOURCE_CAP_MIGHT_NOT_HAVE_VIDEO` flag.
+Doing so results in undefined behavior.
+
+#### Synchronous sources
+Synchronous sources that have the `OBS_SOURCE_CAP_MIGHT_NOT_HAVE_VIDEO` flag set must implement the `has_video` callback.
+This will get called before rendering the source.
+If the source does not have video, it should return `false` in `has_video`.
+In this case, `video_render` will not get called; instead libobs will handle the video that gets shown.
 
 ### UI
 A final UI for this should be decided by dedicated UI/UX discussions, but here are suggestions:
-Ideally as a part of a tabbed properties system ([example](https://github.com/obsproject/obs-studio/pull/8155)), the UI for this would be part of a separate tab.
 
-Here, if a source has set the `OBS_SOURCE_CAP_MIGHT_NOT_HAVE_VIDEO` flag, it would show one combobox or radio button with the three options:
+Ideally, this is part of a tabbed properties system ([example](https://github.com/obsproject/obs-studio/pull/8155)).
+If a source has set the `OBS_SOURCE_CAP_MIGHT_NOT_HAVE_VIDEO` flag, it would show one combobox or radio button with the three options:
 ```
 When no video is shown:
 - Show a black image
 - Show nothing
 - Show the last frame
 ```
+
+If tabbed properties are not an option, the options could be radio button added at the bottom of the source's properties.
+However, it would not technically be a property and not set any "normal" source settings (though to the user it would look like a normal property).
+
 Showing the black image is the default behavior, and is also what gets returned by `obs_source_get_no_video_behavior` by default.
 
-The setting select here by the user gets set on the source in libobs via `obs_source_set_no_video_behavior`.
+The setting selected by the user gets set on the source in libobs via `obs_source_set_no_video_behavior`.
 
 ### Migration
 As mentioned above, by default a black frame should get shown for new sources.
@@ -74,17 +93,3 @@ This includes:
 - *Other?*: I cannot think of other sources, but if there are any, please comment so!
 
 Migrations should be done by the UI.
-
-### Implementation
-Of course, the libobs changes and the UI changes need to be done for any source to implement this.
-It would be helpful if all built-in sources could implement this at the same point, so that it's consistent across the program, but doing so can be optional - it might be necessary to do this is steps due to the variety of source types, especially across operating systems.
-
-## Drawbacks
-Sources still need to implement all of this themselves, and especially third-party sources might not do so.
-An alternative would be having libobs handle more of this (keeping the last frame, etc).
-However, this would still require sources to indicate at which point they have no video, and overall seems more complicated to me.
-
-## Additional Information
-There is no code written for this yet.
-I'm happy about any and all thoughts on and suggestions for this!
-Both about what people think about the concept in general (as mentioned, there could be other ways to solve this), and whether they have better ideas for names of the new APIs.
