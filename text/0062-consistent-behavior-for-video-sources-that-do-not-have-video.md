@@ -10,7 +10,7 @@ OBS handles when a source indicates that it no longer has video.
 Some video sources, like window capture, video capture, or media sources, at some point in their lifetime might not have any video to display.
 Currently, what sources do is that scenario is pretty much a wild west.
 For example, *macOS Screen Capture* shows the last known frame, *Media Sources* have a checkbox between invisible and the last known frame, *Game Capture* (Windows) shows nothing (to my knowledge), etc.
-Past discussions have shown that different users expect differnt things to happen in this case.
+Past discussions have shown that different users expect different things to happen in this case.
 Some want the last frame, others want nothing, etc.
 Part of this are privacy concerns on what is shown, however this goes both ways: A window capture that shows the last frame may not be supposed to do that as the user clicked the window away since they showed something they didn't mean to; meanwhile a source that suddenly shows nothing could expose what is below it.
 Giving control over this to the user should address those conerns.
